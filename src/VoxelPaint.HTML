@@ -1,0 +1,821 @@
+<html><head><base href="." target="_blank">
+<title>3D Voxel Painter with Greedy Meshing</title>
+<script src="../JS/three.min.js"></script>
+<style>
+body { 
+  margin: 0; 
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+#toolbar {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  background: rgba(0,0,0,0.7);
+  padding: 10px;
+  border-radius: 5px;
+  color: white;
+  z-index: 1000;
+}
+.color-btn {
+  width: 30px;
+  height: 30px;
+  border: 2px solid white;  
+  border-radius: 5px;
+  margin: 5px;
+  cursor: pointer;
+  transition: transform 0.2s;  
+  position: relative;
+}
+.color-btn:hover {
+  transform: scale(1.1);  
+}
+.color-btn.selected {  
+  transform: scale(1.1);
+  box-shadow: 0 0 10px white;
+}
+.color-btn input[type="color"] {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  pointer-events: none;
+}
+#rotationControls {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(0,0,0,0.7);
+  padding: 10px;
+  border-radius: 5px;
+  color: white;
+  z-index: 1001;
+  pointer-events: auto;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  touch-action: none;
+}
+.rotation-btn {
+  width: 40px;
+  height: 40px;
+  margin: 5px;
+  border: none;
+  border-radius: 5px;
+  background: #444;
+  color: white;
+  cursor: pointer;
+  font-size: 20px;
+  z-index: 1001;
+  pointer-events: auto;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+#gridControls {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background: rgba(0,0,0,0.7);
+  padding: 10px;
+  border-radius: 5px;
+  color: white;
+  z-index: 1000;
+}
+input[type="number"] {
+  width: 60px;
+  margin: 5px;
+  padding: 5px;
+}
+#gridControls input[type="number"] {
+  width: 60px;
+  margin: 5px;
+  padding: 5px;
+  background: #444;
+  color: white;
+  border: 1px solid #666;
+  border-radius: 3px;
+}
+#gridControls input[type="number"]::-webkit-inner-spin-button,
+#gridControls input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+}
+.color-row {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 300px;
+}
+#toolControls {
+  position: fixed;
+  top: 300px;
+  left: 10px;
+  background: rgba(0,0,0,0.7);
+  padding: 10px;
+  border-radius: 5px;
+  color: white;
+  z-index: 1000;
+}
+
+.control-input {
+  width: 100px;
+  margin: 5px;
+  padding: 5px;
+  background: #444;
+  color: white; 
+  border: 1px solid #666;
+  border-radius: 3px;
+  cursor: pointer;
+  pointer-events: auto !important;
+}
+
+#gridControls input[type="number"],
+#toolSelect,
+input[type="checkbox"],
+select:not(.rotation-btn),
+button:not(.rotation-btn) {
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+}
+
+#gridControls input[type="number"]:focus,
+#toolSelect:focus {
+  outline: 2px solid #666;
+}
+
+.selected-voxel {
+  outline: 2px solid yellow;
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  #toolbar {
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  
+  #toolControls {
+    top: 65vh;
+  }
+  
+  #gridControls {
+    top: auto;
+    bottom: 10px;
+    right: 10px;
+  }
+  
+  #rotationControls {
+    bottom: 10px;
+    left: 10px;
+    right: auto;
+  }
+  
+  .color-btn {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .rotation-btn {
+    width: 50px;
+    height: 50px;
+  }
+}
+
+canvas { 
+  touch-action: none;
+}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <h3>Voxel Painter</h3>
+  <div class="color-row">
+    <!-- Reds -->
+    <div class="color-btn selected" style="background: #FF0000" data-color="0xFF0000">
+      <input type="color" value="#FF0000">
+    </div>
+    <div class="color-btn" style="background: #FF4040" data-color="0xFF4040">
+      <input type="color" value="#FF4040">
+    </div>
+    <div class="color-btn" style="background: #800000" data-color="0x800000">
+      <input type="color" value="#800000">
+    </div>
+
+    <!-- Oranges/Browns -->
+    <div class="color-btn" style="background: #FFA500" data-color="0xFFA500">
+      <input type="color" value="#FFA500">
+    </div>
+    <div class="color-btn" style="background: #784315" data-color="0x784315">
+      <input type="color" value="#784315">
+    </div>
+
+    <!-- Yellows -->
+    <div class="color-btn" style="background: #FFFF00" data-color="0xFFFF00">
+      <input type="color" value="#FFFF00"> 
+    </div>
+
+    <!-- Pinks/Magentas --> 
+    <div class="color-btn" style="background: #EA3680" data-color="0xEA3680">
+      <input type="color" value="#EA3680">
+    </div>
+    <div class="color-btn" style="background: #EA3FF7" data-color="0xEA3FF7">
+      <input type="color" value="#EA3FF7">
+    </div>
+    <div class="color-btn" style="background: #EF88BE" data-color="0xEF88BE">
+      <input type="color" value="#EF88BE">
+    </div>
+
+    <!-- Purples/Violets -->
+    <div class="color-btn" style="background: #39107B" data-color="0x39107B">
+      <input type="color" value="#39107B">
+    </div>
+    <div class="color-btn" style="background: #58135E" data-color="0x58135E">
+      <input type="color" value="#58135E">
+    </div>
+    <div class="color-btn" style="background: #7E84F7" data-color="0x7E84F7">
+      <input type="color" value="#7E84F7">
+    </div>
+
+    <!-- Blues -->
+    <div class="color-btn" style="background: #074CF5" data-color="0x074CF5">
+      <input type="color" value="#074CF5">
+    </div>
+    <div class="color-btn" style="background: #00129A" data-color="0x00129A">
+      <input type="color" value="#00129A">
+    </div>
+    <div class="color-btn" style="background: #3580BB" data-color="0x3580BB">
+      <input type="color" value="#3580BB">
+    </div>
+    <div class="color-btn" style="background: #3193FD" data-color="0x3193FD">
+      <input type="color" value="#3193FD">
+    </div>
+    <div class="color-btn" style="background: #00B6FF" data-color="0x00B6FF">
+      <input type="color" value="#00B6FF">
+    </div>
+    <div class="color-btn" style="background: #73FBFD" data-color="0x73FBFD">
+      <input type="color" value="#73FBFD">
+    </div>
+
+    <!-- Greens/Teals -->
+    <div class="color-btn" style="background: #173F3F" data-color="0x173F3F">
+      <input type="color" value="#173F3F">
+    </div>
+    <div class="color-btn" style="background: #74FDD4" data-color="0x74FDD4">
+      <input type="color" value="#74FDD4">
+    </div>
+    <div class="color-btn" style="background: #00FF00" data-color="0x00FF00">
+      <input type="color" value="#00FF00">
+    </div>
+    <div class="color-btn" style="background: #AFFA4B" data-color="0xAFFA4B">
+      <input type="color" value="#AFFA4B">
+    </div>
+
+    <!-- Black & White -->
+    <div class="color-btn" style="background: #FFFFFF" data-color="0xFFFFFF">
+      <input type="color" value="#FFFFFF">
+    </div>
+    <div class="color-btn" style="background: #000000" data-color="0x000000">
+      <input type="color" value="#000000">
+    </div>
+  </div>
+  <br>
+  <button id="clear">Clear All</button>
+</div>
+
+<div id="toolControls">
+  <h3>Tools</h3>
+  <select id="toolSelect" class="control-input">
+    <option value="paint">Paint</option>
+    <option value="select">Select</option>
+    <option value="move">Move</option>
+  </select>
+  <div>
+    <input type="checkbox" id="groupSelect">
+    <label for="groupSelect">Group Select</label>
+  </div>
+</div>
+
+<div id="gridControls">
+  <h3>Grid Size</h3>
+  <label>Size: <input type="number" id="gridSize" value="20" min="5" max="100" step="1"></label>
+  <button id="updateGrid">Update Grid</button>
+</div>
+
+<div id="rotationControls">
+  <button class="rotation-btn" id="rotateLeft">&#x21bb;</button>
+  <button class="rotation-btn" id="rotateRight">&#x21ba;</button>
+</div>
+
+<script>
+let scene, camera, renderer, raycaster;
+let plane, rollOverMesh;
+let cubeGeo, cubeMaterial;
+let objects = [];
+let currentColor = 0xff0000;
+let cameraRadius = 1300;
+let cameraAngle = 0;
+let gridHelper;
+let gridSize = 20;
+let voxelData = new Map();
+let currentTool = 'paint';
+let selectedVoxels = new Set();
+let isMoving = false;
+let moveStartPosition = null;
+let moveStartVoxels = null;
+let touchStartX = 0;
+let touchStartY = 0;
+
+function updateColorSelection(selectedButton) {
+  document.querySelectorAll('.color-btn').forEach(btn => {
+    btn.classList.remove('selected');
+  });
+  selectedButton.classList.add('selected');
+}
+
+function createVoxelKey(x, y, z) {
+  return `${x},${y},${z}`;
+}
+
+function getVoxelAt(x, y, z) {
+  return voxelData.get(createVoxelKey(x, y, z));
+}
+
+function setVoxelAt(x, y, z, color) {
+  voxelData.set(createVoxelKey(x, y, z), color);
+}
+
+function removeVoxelAt(x, y, z) {
+  voxelData.delete(createVoxelKey(x, y, z));
+}
+
+function shouldRenderFace(direction, position) {
+  const nx = position[0] + direction[0];
+  const ny = position[1] + direction[1];
+  const nz = position[2] + direction[2];
+  return !getVoxelAt(nx, ny, nz);
+}
+
+function greedyMesh() {
+  const faces = [];
+  const halfGrid = Math.floor(gridSize / 2);
+  for (let x = -halfGrid; x < halfGrid; x++) {
+    for (let y = 0; y < gridSize; y++) {
+      for (let z = -halfGrid; z < halfGrid; z++) {
+        const voxel = getVoxelAt(x, y, z);
+        if (voxel === undefined) continue;
+        const directions = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+        directions.forEach(dir => {
+          if (shouldRenderFace(dir, [x, y, z])) {
+            faces.push({
+              position: [x, y, z],
+              direction: dir,
+              color: voxel
+            });
+          }
+        });
+      }
+    }
+  }
+  return faces;
+}
+
+function updateMesh() {
+  if (!scene) {
+    console.error('Scene not initialized');
+    return;
+  }
+  objects = objects.filter(obj => {
+    if (obj !== plane && obj !== gridHelper) {
+      scene.remove(obj);
+      return false;
+    }
+    return true;
+  });
+  const faces = greedyMesh();
+  faces.forEach(face => {
+    const geometry = new THREE.PlaneGeometry(50, 50);
+    const material = new THREE.MeshLambertMaterial({
+      color: face.color,
+      side: THREE.DoubleSide,
+      emissive: isVoxelSelected(new THREE.Vector3(...face.position)) ? 0x444444 : 0x000000
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(face.position[0] * 50 + 25, face.position[1] * 50 + 25, face.position[2] * 50 + 25);
+    if (face.direction[0] !== 0) {
+      mesh.rotateY(Math.PI / 2);
+      mesh.position.x += face.direction[0] * 25;
+    } else if (face.direction[1] !== 0) {
+      mesh.rotateX(-Math.PI / 2);
+      mesh.position.y += face.direction[1] * 25;
+    } else if (face.direction[2] !== 0) {
+      mesh.position.z += face.direction[2] * 25;
+    }
+    scene.add(mesh);
+    objects.push(mesh);
+  });
+}
+
+function updateGridHelper() {
+  if (!scene) {
+    console.error('Scene not initialized');
+    return;
+  }
+  const newSize = parseInt(document.getElementById('gridSize').value);
+  if (!isNaN(newSize) && newSize >= 5 && newSize <= 100) {
+    let adjusted = newSize;
+    if (adjusted % 2 !== 0) {
+      adjusted++;
+    }
+    gridSize = adjusted;
+    document.getElementById('gridSize').value = gridSize;
+  } else {
+    console.warn('Invalid grid size');
+    return;
+  }
+  if (gridHelper) {
+    scene.remove(gridHelper);
+    objects = objects.filter(obj => obj !== gridHelper);
+  }
+  if (plane) {
+    scene.remove(plane);
+    objects = objects.filter(obj => obj !== plane);
+  }
+  gridHelper = new THREE.GridHelper(gridSize * 50, gridSize);
+  scene.add(gridHelper);
+  objects.push(gridHelper);
+
+  const planeGeometry = new THREE.PlaneGeometry(gridSize * 50, gridSize * 50);
+  planeGeometry.rotateX(-Math.PI / 2);
+  plane = new THREE.Mesh(planeGeometry, new THREE.MeshBasicMaterial({
+    visible: false
+  }));
+  scene.add(plane);
+  objects.push(plane);
+
+  if (rollOverMesh) {
+    rollOverMesh.position.set(0, 0, 0);
+  }
+  updateCameraPosition();
+  updateMesh();
+}
+
+function init() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
+  updateCameraPosition();
+
+  renderer = new THREE.WebGLRenderer({
+    antialias: true
+  });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const rollOverGeo = new THREE.BoxGeometry(50, 50, 50);
+  const rollOverMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff0000,
+    opacity: 0.5,
+    transparent: true
+  });
+  rollOverMesh = new THREE.Mesh(rollOverGeo, rollOverMaterial);
+  scene.add(rollOverMesh);
+
+  updateGridHelper();
+  raycaster = new THREE.Raycaster();
+  const geometry = new THREE.PlaneGeometry(1000, 1000);
+  geometry.rotateX(-Math.PI / 2);
+  plane = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    visible: false
+  }));
+  scene.add(plane);
+  objects.push(plane);
+  const ambientLight = new THREE.AmbientLight(0x606060);
+  scene.add(ambientLight);
+
+  const directionalLight = new THREE.DirectionalLight(0xffffff);
+  directionalLight.position.set(1, 0.75, 0.5).normalize();
+  scene.add(directionalLight);
+
+  if (!rollOverMesh) {
+    console.error('rollOverMesh not initialized');
+    return;
+  }
+
+  document.addEventListener('mousemove', onDocumentMouseMove);
+  document.addEventListener('mousedown', onDocumentMouseDown);
+  window.addEventListener('resize', onWindowResize);
+
+  document.querySelectorAll('.color-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      currentColor = parseInt(btn.dataset.color);
+      rollOverMesh.material.color.setHex(currentColor);
+      updateColorSelection(btn);
+    });
+    btn.addEventListener('dblclick', e => {
+      const colorInput = btn.querySelector('input[type="color"]');
+      if (colorInput) {
+        colorInput.click();
+        colorInput.style.pointerEvents = 'auto';
+        colorInput.addEventListener('change', () => {
+          colorInput.style.pointerEvents = 'none';
+        }, {
+          once: true
+        });
+      }
+    });
+    const colorInput = btn.querySelector('input[type="color"]');
+    colorInput.addEventListener('input', e => {
+      const hexColor = e.target.value;
+      const threeColor = hexColor.replace('#', '0x');
+      btn.style.background = hexColor;
+      btn.dataset.color = threeColor;
+      if (btn.classList.contains('selected')) {
+        currentColor = parseInt(threeColor);
+        rollOverMesh.material.color.setHex(currentColor);
+      }
+    });
+  });
+
+  document.getElementById('clear').addEventListener('click', () => {
+    voxelData.clear();
+    updateMesh();
+  });
+  document.getElementById('rotateLeft').addEventListener('click', () => {
+    cameraAngle -= Math.PI / 4;
+    updateCameraPosition();
+  });
+  const rotateRightBtn = document.getElementById('rotateRight');
+  rotateRightBtn.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    cameraAngle += Math.PI / 4;
+    updateCameraPosition();
+  });
+
+  document.getElementById('rotateLeft').addEventListener('touchstart', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    cameraAngle -= Math.PI / 4;
+    updateCameraPosition();
+  }, {
+    passive: false
+  });
+  document.getElementById('rotateRight').addEventListener('touchstart', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    cameraAngle += Math.PI / 4;
+    updateCameraPosition();
+  }, {
+    passive: false
+  });
+
+  const gridSizeInput = document.getElementById('gridSize');
+  if (gridSizeInput) {
+    gridSizeInput.addEventListener('input', function (e) {
+      let newSize = parseInt(e.target.value);
+      if (!isNaN(newSize) && newSize >= 5 && newSize <= 100) {
+        if (newSize % 2 !== 0) {
+          newSize++;
+        }
+        gridSize = newSize;
+      }
+    });
+    gridSizeInput.addEventListener('change', function (e) {
+      let newSize = parseInt(e.target.value);
+      if (!isNaN(newSize) && newSize >= 5 && newSize <= 100) {
+        if (newSize % 2 !== 0) {
+          newSize++;
+        }
+        gridSize = newSize;
+        updateGridHelper();
+      }
+    });
+  }
+
+  document.getElementById('updateGrid').addEventListener('click', function (e) {
+    let newSize = parseInt(document.getElementById('gridSize').value);
+    if (!isNaN(newSize) && newSize >= 5 && newSize <= 100) {
+      if (newSize % 2 !== 0) {
+        newSize++;
+      }
+      gridSize = newSize;
+      updateGridHelper();
+    }
+  });
+
+  const toolSelect = document.getElementById('toolSelect');
+  if (toolSelect) {
+    toolSelect.addEventListener('change', function (e) {
+      currentTool = e.target.value;
+      if (currentTool !== 'select' && currentTool !== 'move') {
+        clearSelection();
+        isMoving = false;
+        moveStartPosition = null;
+        moveStartVoxels = null;
+      }
+    });
+  }
+
+  document.addEventListener('touchstart', onTouchStart, {
+    passive: false
+  });
+  document.addEventListener('touchmove', onTouchMove, {
+    passive: false
+  });
+  document.addEventListener('touchend', onTouchEnd, {
+    passive: false
+  });
+
+  const controls = document.querySelectorAll('#gridControls input, #toolSelect, input[type="checkbox"], select, button:not(.rotation-btn)');
+  controls.forEach(control => {
+    control.addEventListener('mousedown', e => e.stopPropagation(), true);
+    control.addEventListener('touchstart', e => e.stopPropagation(), true);
+    control.addEventListener('click', e => e.stopPropagation(), true);
+    control.style.pointerEvents = 'auto';
+    control.style.userSelect = 'text';
+  });
+}
+
+function updateCameraPosition() {
+  if (!camera) return;
+  camera.position.x = cameraRadius * Math.cos(cameraAngle);
+  camera.position.z = cameraRadius * Math.sin(cameraAngle);
+  camera.position.y = 800;
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+  if (renderer) {
+    renderer.render(scene, camera);
+  }
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  updateCameraPosition();
+}
+
+function onDocumentMouseMove(event) {
+  const rotationControls = document.getElementById('rotationControls');
+  const rotationControlsBounds = rotationControls.getBoundingClientRect();
+  if (event.clientX >= rotationControlsBounds.left && event.clientX <= rotationControlsBounds.right && event.clientY >= rotationControlsBounds.top && event.clientY <= rotationControlsBounds.bottom) {
+    return;
+  }
+  event.preventDefault();
+  if (!rollOverMesh) return;
+  const mouse = new THREE.Vector2();
+  mouse.set(event.clientX / window.innerWidth * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(objects);
+  if (intersects.length > 0) {
+    const intersect = intersects[0];
+    if (!intersect.face) return;
+    if (currentTool === 'move' && isMoving) {
+      const position = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal).divideScalar(50).floor();
+      moveSelectedVoxels(position);
+    } else {
+      rollOverMesh.position.copy(intersect.point).add(intersect.face.normal).divideScalar(50).floor().multiplyScalar(50).addScalar(25);
+    }
+  }
+}
+
+function onDocumentMouseDown(event) {
+  const rotationControls = document.getElementById('rotationControls');
+  const rotationControlsBounds = rotationControls.getBoundingClientRect();
+  if (event.clientX >= rotationControlsBounds.left && event.clientX <= rotationControlsBounds.right && event.clientY >= rotationControlsBounds.top && event.clientY <= rotationControlsBounds.bottom) {
+    return;
+  }
+  event.preventDefault();
+  const mouse = new THREE.Vector2();
+  mouse.set(event.clientX / window.innerWidth * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(objects);
+  if (intersects.length > 0) {
+    const intersect = intersects[0];
+    if (!intersect.face) return;
+    const position = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal).divideScalar(50).floor();
+    if (currentTool === 'paint') {
+      setVoxelAt(position.x, position.y, position.z, currentColor);
+      updateMesh();
+    } else if (currentTool === 'select') {
+      handleSelection(position, event.ctrlKey || document.getElementById('groupSelect').checked);
+    } else if (currentTool === 'move') {
+      if (isVoxelSelected(position)) {
+        isMoving = true;
+        moveStartPosition = position.clone();
+        moveStartVoxels = new Map(Array.from(selectedVoxels).map(pos => {
+          const color = getVoxelAt(pos.x, pos.y, pos.z);
+          return [pos.toArray().join(','), {
+            position: pos.clone(),
+            color
+          }];
+        }));
+      }
+    }
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+
+function handleSelection(position, isGroupSelect) {
+  const posKey = `${position.x},${position.y},${position.z}`;
+  if (!isGroupSelect) {
+    clearSelection();
+  }
+  if (getVoxelAt(position.x, position.y, position.z) !== undefined) {
+    if (isVoxelSelected(position)) {
+      selectedVoxels.delete(position);
+    } else {
+      selectedVoxels.add(position);
+    }
+    updateMesh();
+  }
+}
+
+function isVoxelSelected(position) {
+  return Array.from(selectedVoxels).some(pos => pos.x === position.x && pos.y === position.y && pos.z === position.z);
+}
+
+function clearSelection() {
+  selectedVoxels.clear();
+  updateMesh();
+}
+
+function moveSelectedVoxels(newPosition) {
+  if (!moveStartPosition || !moveStartVoxels) return;
+  const offset = new THREE.Vector3().subVectors(newPosition, moveStartPosition);
+  selectedVoxels.forEach(pos => {
+    removeVoxelAt(pos.x, pos.y, pos.z);
+  });
+  moveStartVoxels.forEach((data, key) => {
+    const newPos = data.position.clone().add(offset);
+    setVoxelAt(newPos.x, newPos.y, newPos.z, data.color);
+    selectedVoxels.delete(data.position);
+    selectedVoxels.add(newPos);
+  });
+  updateMesh();
+}
+
+function onTouchStart(event) {
+  if (event.target.closest('#rotationControls')) {
+    event.preventDefault();
+    return;
+  }
+  if (event.target.matches('.control-input, #gridControls input, #toolSelect, input[type="checkbox"], select, button')) {
+    return;
+  }
+}
+
+function onTouchMove(event) {
+  const target = event.target;
+  if (!event.target.matches('.control-input, #gridControls input, #toolSelect, input[type="checkbox"], select, button')) {
+    event.preventDefault();
+  }
+  if (event.touches.length === 1) {
+    onDocumentMouseMove({
+      preventDefault: () => {},
+      clientX: event.touches[0].clientX,
+      clientY: event.touches[0].clientY
+    });
+  }
+}
+
+function onTouchEnd(event) {
+  const target = event.target;
+  if (event.target.matches('.control-input, #gridControls input, #toolSelect, input[type="checkbox"], select, button')) {
+    return;
+  }
+  event.preventDefault();
+  if (isMoving) {
+    isMoving = false;
+    moveStartPosition = null;
+    moveStartVoxels = null;
+  }
+}
+
+document.addEventListener('mouseup', () => {
+  if (isMoving) {
+    isMoving = false;
+    moveStartPosition = null;
+    moveStartVoxels = null;
+  }
+});
+
+document.addEventListener('touchstart', onTouchStart);
+document.addEventListener('touchmove', onTouchMove);
+document.addEventListener('touchend', onTouchEnd);
+
+init();
+animate();
+</script>
+</body>
+</html>
