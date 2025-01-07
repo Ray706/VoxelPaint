@@ -212,8 +212,8 @@ canvas {
   cursor: pointer;
 }
 #positionDisplay span {
-  display: block;
-  margin: 5px 0;
+  display: inline-block;
+  margin: 5px 10px;
 }
 </style>
 </head>
@@ -359,7 +359,7 @@ let cubeGeo, cubeMaterial;
 let objects = [];
 let currentColor = 0xff0000;
 let cameraRadius = 1300;
-let cameraAngle = 0;
+let cameraAngle = Math.PI / 2; 
 let gridHelper;
 let gridSize = 20;
 let voxelData = new Map();
@@ -564,12 +564,12 @@ function init() {
     return;
   }
 
-  document.getElementById('moveNorth').addEventListener('click', () => moveCursor(0, 0, -1));
-  document.getElementById('moveSouth').addEventListener('click', () => moveCursor(0, 0, 1));
-  document.getElementById('moveEast').addEventListener('click', () => moveCursor(1, 0, 0));
-  document.getElementById('moveWest').addEventListener('click', () => moveCursor(-1, 0, 0));
-  document.getElementById('moveUp').addEventListener('click', () => moveCursor(0, 1, 0));
-  document.getElementById('moveDown').addEventListener('click', () => moveCursor(0, -1, 0));
+  document.getElementById('moveNorth').addEventListener('click', (e) => { e.stopPropagation(); moveCursor(0, 0, -1); });
+  document.getElementById('moveSouth').addEventListener('click', (e) => { e.stopPropagation(); moveCursor(0, 0, 1); });
+  document.getElementById('moveEast').addEventListener('click', (e) => { e.stopPropagation(); moveCursor(1, 0, 0); });
+  document.getElementById('moveWest').addEventListener('click', (e) => { e.stopPropagation(); moveCursor(-1, 0, 0); });
+  document.getElementById('moveUp').addEventListener('click', (e) => { e.stopPropagation(); moveCursor(0, 1, 0); });
+  document.getElementById('moveDown').addEventListener('click', (e) => { e.stopPropagation(); moveCursor(0, -1, 0); });
 
   document.addEventListener('keydown', (event) => {
     switch (event.key) {
@@ -727,6 +727,8 @@ function init() {
     control.style.pointerEvents = 'auto';
     control.style.userSelect = 'text';
   });
+
+  updateCameraPosition();
 }
 
 function updateCameraPosition() {
