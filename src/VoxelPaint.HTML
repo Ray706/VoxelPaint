@@ -235,6 +235,26 @@ canvas {
   border-radius: 5px;
   cursor: pointer;
 }
+
+#deleteControls {
+  position: fixed;
+  bottom: 200px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  border-radius: 5px;
+  color: white;
+  z-index: 1000;
+}
+#deleteControls button {
+  margin: 5px;
+  padding: 10px;
+  background: #444;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
 </style>
 </head>
 <body>
@@ -339,6 +359,7 @@ canvas {
     <option value="paint">Paint</option>
     <option value="select">Select</option>
     <option value="move">Move</option>
+    <option value="delete">Delete</option>
   </select>
   <div>
     <input type="checkbox" id="groupSelect">
@@ -373,6 +394,9 @@ canvas {
 </div>
 <div id="drawControls">
   <button id="drawVoxel">Draw Voxel</button>
+</div>
+<div id="deleteControls">
+  <button id="deleteVoxel">Delete Voxel</button>
 </div>
 
 <script>
@@ -422,6 +446,12 @@ function updateColorSelection(selectedButton) {
 function drawVoxel() {
   const position = rollOverMesh.position.clone().subScalar(25).divideScalar(50).floor();
   setVoxelAt(position.x, position.y, position.z, currentColor);
+  updateMesh();
+}
+
+function deleteVoxel() {
+  const position = rollOverMesh.position.clone().subScalar(25).divideScalar(50).floor();
+  removeVoxelAt(position.x, position.y, position.z);
   updateMesh();
 }
 
@@ -628,6 +658,14 @@ function init() {
       case 'e':
         moveCursor(0, -1, 0);
         break;
+    }
+  });
+
+  document.getElementById('deleteVoxel').addEventListener('click', () => deleteVoxel());
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Delete' || event.key === 'Del') {
+      deleteVoxel();
     }
   });
 
@@ -843,6 +881,9 @@ function onDocumentMouseDown(event) {
           }];
         }));
       }
+    } else if (currentTool === 'delete') {
+      removeVoxelAt(position.x, position.y, position.z);
+      updateMesh();
     }
   }
 }
