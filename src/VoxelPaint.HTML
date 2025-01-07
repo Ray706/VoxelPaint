@@ -215,6 +215,26 @@ canvas {
   display: inline-block;
   margin: 5px 10px;
 }
+
+#drawControls {
+  position: fixed;
+  bottom: 150px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  border-radius: 5px;
+  color: white;
+  z-index: 1000;
+}
+#drawControls button {
+  margin: 5px;
+  padding: 10px;
+  background: #444;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
 </style>
 </head>
 <body>
@@ -351,6 +371,9 @@ canvas {
   <button id="moveUp">Up</button>
   <button id="moveDown">Down</button>
 </div>
+<div id="drawControls">
+  <button id="drawVoxel">Draw Voxel</button>
+</div>
 
 <script>
 let scene, camera, renderer, raycaster;
@@ -394,6 +417,12 @@ function updateColorSelection(selectedButton) {
     btn.classList.remove('selected');
   });
   selectedButton.classList.add('selected');
+}
+
+function drawVoxel() {
+  const position = rollOverMesh.position.clone().subScalar(25).divideScalar(50).floor();
+  setVoxelAt(position.x, position.y, position.z, currentColor);
+  updateMesh();
 }
 
 function createVoxelKey(x, y, z) {
@@ -570,6 +599,14 @@ function init() {
   document.getElementById('moveWest').addEventListener('click', (e) => { e.stopPropagation(); moveCursor(-1, 0, 0); });
   document.getElementById('moveUp').addEventListener('click', (e) => { e.stopPropagation(); moveCursor(0, 1, 0); });
   document.getElementById('moveDown').addEventListener('click', (e) => { e.stopPropagation(); moveCursor(0, -1, 0); });
+  
+  document.getElementById('drawVoxel').addEventListener('click', () => drawVoxel());
+  
+  document.addEventListener('keydown', (event) => {
+    if (event.key === ' ') {
+      drawVoxel();
+    }
+  });
 
   document.addEventListener('keydown', (event) => {
     switch (event.key) {
