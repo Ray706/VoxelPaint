@@ -191,6 +191,30 @@ button:not(.rotation-btn) {
 canvas { 
   touch-action: none;
 }
+
+#cursorControls {
+  position: fixed;
+  bottom: 100px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  border-radius: 5px;
+  color: white;
+  z-index: 1000;
+}
+#cursorControls button {
+  margin: 5px;
+  padding: 10px;
+  background: #444;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+#positionDisplay span {
+  display: block;
+  margin: 5px 0;
+}
 </style>
 </head>
 <body>
@@ -313,6 +337,21 @@ canvas {
   <button class="rotation-btn" id="rotateRight">&#x21ba;</button>
 </div>
 
+<div id="cursorControls">
+  <h3>Cursor Position</h3>
+  <div id="positionDisplay">
+    <span>X: <span id="cursorX">0</span></span>
+    <span>Y: <span id="cursorY">0</span></span>
+    <span>Z: <span id="cursorZ">0</span></span>
+  </div>
+  <button id="moveNorth">North</button>
+  <button id="moveSouth">South</button>
+  <button id="moveEast">East</button>
+  <button id="moveWest">West</button>
+  <button id="moveUp">Up</button>
+  <button id="moveDown">Down</button>
+</div>
+
 <script>
 let scene, camera, renderer, raycaster;
 let plane, rollOverMesh;
@@ -331,6 +370,24 @@ let moveStartPosition = null;
 let moveStartVoxels = null;
 let touchStartX = 0;
 let touchStartY = 0;
+
+let cursorX = 0;
+let cursorY = 0;
+let cursorZ = 0;
+
+function updateCursorDisplay() {
+  document.getElementById('cursorX').textContent = cursorX;
+  document.getElementById('cursorY').textContent = cursorY;
+  document.getElementById('cursorZ').textContent = cursorZ;
+}
+
+function moveCursor(dx, dy, dz) {
+  cursorX += dx;
+  cursorY += dy;
+  cursorZ += dz;
+  rollOverMesh.position.set(cursorX * 50 + 25, cursorY * 50 + 25, cursorZ * 50 + 25);
+  updateCursorDisplay();
+}
 
 function updateColorSelection(selectedButton) {
   document.querySelectorAll('.color-btn').forEach(btn => {
@@ -506,6 +563,36 @@ function init() {
     console.error('rollOverMesh not initialized');
     return;
   }
+
+  document.getElementById('moveNorth').addEventListener('click', () => moveCursor(0, 0, -1));
+  document.getElementById('moveSouth').addEventListener('click', () => moveCursor(0, 0, 1));
+  document.getElementById('moveEast').addEventListener('click', () => moveCursor(1, 0, 0));
+  document.getElementById('moveWest').addEventListener('click', () => moveCursor(-1, 0, 0));
+  document.getElementById('moveUp').addEventListener('click', () => moveCursor(0, 1, 0));
+  document.getElementById('moveDown').addEventListener('click', () => moveCursor(0, -1, 0));
+
+  document.addEventListener('keydown', (event) => {
+    switch (event.key) {
+      case 'w':
+        moveCursor(0, 0, -1);
+        break;
+      case 's':
+        moveCursor(0, 0, 1);
+        break;
+      case 'a':
+        moveCursor(-1, 0, 0);
+        break;
+      case 'd':
+        moveCursor(1, 0, 0);
+        break;
+      case 'q':
+        moveCursor(0, 1, 0);
+        break;
+      case 'e':
+        moveCursor(0, -1, 0);
+        break;
+    }
+  });
 
   document.addEventListener('mousemove', onDocumentMouseMove);
   document.addEventListener('mousedown', onDocumentMouseDown);
