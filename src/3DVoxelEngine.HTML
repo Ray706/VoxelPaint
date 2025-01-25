@@ -1,0 +1,257 @@
+<html><head><base href="." /><title>3D Voxel Engine</title><style>
+  body { margin: 0; overflow: hidden; background: #000; }
+  #world { width: 100vw; height: 100vh; }
+  .controls {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    color: white;
+    font-family: monospace;
+    background: rgba(0,0,0,0.5);
+    padding: 10px;
+    border-radius: 5px;
+  }
+</style></head><body>
+<canvas id="world"></canvas>
+<div class="controls">
+  WASD - Move | Mouse - Look | Click - Place/Remove Voxel
+  <br>FPS: <span id="fps">0</span>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// Optimized Voxel Engine
+class VoxelWorld {
+  constructor() {
+    // Three.js setup
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    this.renderer = new THREE.WebGLRenderer({canvas: document.getElementById('world'), antialias: false});
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    
+    // Chunked world storage using typed arrays for performance
+    this.chunkSize = 16;
+    this.chunks = new Map();
+    
+    // Geometry instancing for rendering optimization
+    this.voxelGeometry = new THREE.BoxGeometry(1, 1, 1);
+    this.voxelMaterial = new THREE.MeshLambertMaterial({color: 0x808080});
+    
+    // Lighting
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(5, 15, 5);
+    this.scene.add(light);
+    this.scene.add(new THREE.AmbientLight(0x404040));
+    
+    // Camera controls
+    this.camera.position.set(0, 20, 20); // Moved camera back and up
+    this.camera.lookAt(0, 0, 0);
+    
+    // Performance monitoring
+    this.lastTime = performance.now();
+    this.frames = 0;
+    
+    this.init();
+  }
+  
+  init() {
+    // Generate initial world
+    this.generateTerrain();
+    
+    // Input handling
+    document.addEventListener('mousemove', this.handleMouseMove.bind(this));
+    document.addEventListener('keydown', this.handleKeyDown.bind(this));
+    document.addEventListener('click', this.handleClick.bind(this));
+    
+    // Start render loop
+    this.animate();
+  }
+  
+  generateTerrain() {
+    // Generate procedural terrain using simplex noise
+    for(let x = -2; x < 2; x++) {
+      for(let z = -2; z < 2; z++) {
+        this.generateChunk(x, z);
+      }
+    }
+  }
+  
+  generateChunk(chunkX, chunkZ) {
+    const key = `${chunkX},${chunkZ}`;
+    const chunk = new Int8Array(this.chunkSize * this.chunkSize * this.chunkSize);
+    
+    // Simple heightmap-based terrain
+    for(let x = 0; x < this.chunkSize; x++) {
+      for(let z = 0; z < this.chunkSize; z++) {
+        const height = Math.floor(Math.sin(x/4) * Math.cos(z/4) * 4) + 8;
+        for(let y = 0; y < height; y++) {
+          const index = this.getVoxelIndex(x, y, z);
+          chunk[index] = 1;
+        }
+      }
+    }
+    
+    this.chunks.set(key, chunk);
+    this.rebuildChunkMesh(chunkX, chunkZ);
+  }
+  
+  getVoxelIndex(x, y, z) {
+    return (y * this.chunkSize * this.chunkSize) + (z * this.chunkSize) + x;
+  }
+  
+  rebuildChunkMesh(chunkX, chunkZ) {
+    const key = `${chunkX},${chunkZ}`;
+    const chunk = this.chunks.get(key);
+    
+    // Remove old mesh if it exists
+    const oldMesh = this.scene.getObjectByName(key);
+    if(oldMesh) this.scene.remove(oldMesh);
+    
+    // Create geometry for visible blocks
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshLambertMaterial({color: 0x808080});
+    
+    // Create a group to hold all blocks in the chunk
+    const chunkGroup = new THREE.Group();
+    chunkGroup.name = key;
+    
+    for(let x = 0; x < this.chunkSize; x++) {
+      for(let y = 0; y < this.chunkSize; y++) {
+        for(let z = 0; z < this.chunkSize; z++) {
+          const index = this.getVoxelIndex(x, y, z);
+          if(chunk[index] === 1) {
+            // Only add visible faces
+            if(this.isVoxelVisible(x, y, z, chunk)) {
+              const mesh = new THREE.Mesh(geometry, material);
+              mesh.position.set(
+                x + chunkX * this.chunkSize,
+                y,
+                z + chunkZ * this.chunkSize
+              );
+              chunkGroup.add(mesh);
+            }
+          }
+        }
+      }
+    }
+    
+    this.scene.add(chunkGroup);
+  }
+  
+  isVoxelVisible(x, y, z, chunk) {
+    // Check if any face is exposed to air
+    const directions = [
+      [0,1,0], [0,-1,0],
+      [1,0,0], [-1,0,0],
+      [0,0,1], [0,0,-1]
+    ];
+    
+    for(const [dx,dy,dz] of directions) {
+      const nx = x + dx;
+      const ny = y + dy;
+      const nz = z + dz;
+      
+      if(nx < 0 || ny < 0 || nz < 0 || 
+         nx >= this.chunkSize || ny >= this.chunkSize || nz >= this.chunkSize ||
+         chunk[this.getVoxelIndex(nx,ny,nz)] === 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  handleMouseMove(event) {
+    if(document.pointerLockElement === document.body) {
+      const sensitivity = 0.002;
+      this.camera.rotation.y -= event.movementX * sensitivity;
+      this.camera.rotation.x -= event.movementY * sensitivity;
+      this.camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.camera.rotation.x));
+    }
+  }
+  
+  handleKeyDown(event) {
+    // Movement
+    const speed = 0.5;
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    
+    switch(event.key.toLowerCase()) {
+      case 'w': this.camera.position.addScaledVector(forward, speed); break;
+      case 's': this.camera.position.addScaledVector(forward, -speed); break;
+      case 'a': this.camera.position.addScaledVector(right, -speed); break;
+      case 'd': this.camera.position.addScaledVector(right, speed); break;
+      case ' ': this.camera.position.y += speed; break;
+      case 'shift': this.camera.position.y -= speed; break;
+    }
+  }
+  
+  handleClick(event) {
+    // Raycasting for voxel placement/removal
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2(
+      (event.clientX / window.innerWidth) * 2 - 1,
+      -(event.clientY / window.innerHeight) * 2 + 1
+    );
+    
+    raycaster.setFromCamera(mouse, this.camera);
+    
+    const intersects = raycaster.intersectObjects(this.scene.children, true);
+    if(intersects.length > 0) {
+      const point = intersects[0].point;
+      
+      // Convert world position to chunk coordinates
+      const chunkX = Math.floor(point.x / this.chunkSize);
+      const chunkZ = Math.floor(point.z / this.chunkSize);
+      const key = `${chunkX},${chunkZ}`;
+      
+      if(this.chunks.has(key)) {
+        const chunk = this.chunks.get(key);
+        const localX = Math.floor(point.x - chunkX * this.chunkSize);
+        const localY = Math.floor(point.y);
+        const localZ = Math.floor(point.z - chunkZ * this.chunkSize);
+        
+        if(localX >= 0 && localX < this.chunkSize &&
+           localY >= 0 && localY < this.chunkSize &&
+           localZ >= 0 && localZ < this.chunkSize) {
+          // Toggle voxel
+          const index = this.getVoxelIndex(localX, localY, localZ);
+          chunk[index] = chunk[index] ? 0 : 1;
+          
+          // Rebuild affected chunk
+          this.rebuildChunkMesh(chunkX, chunkZ);
+        }
+      }
+    }
+  }
+  
+  animate() {
+    requestAnimationFrame(this.animate.bind(this));
+    
+    // FPS counter
+    this.frames++;
+    const now = performance.now();
+    if(now - this.lastTime > 1000) {
+      document.getElementById('fps').textContent = this.frames;
+      this.frames = 0;
+      this.lastTime = now;
+    }
+    
+    this.renderer.render(this.scene, this.camera);
+  }
+}
+
+// Initialize engine
+const world = new VoxelWorld();
+
+// Handle window resize
+window.addEventListener('resize', () => {
+  world.camera.aspect = window.innerWidth / window.innerHeight;
+  world.camera.updateProjectionMatrix();
+  world.renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Pointer lock for mouse control
+document.addEventListener('click', () => {
+  document.body.requestPointerLock();
+});
+</script></body></html>
