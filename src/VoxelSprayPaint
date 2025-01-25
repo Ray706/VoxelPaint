@@ -1,0 +1,760 @@
+<html><head><base href="."><title>Voxel Spraypaint</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+body { margin: 0; overflow: hidden; }
+#toolbar {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.7);
+    padding: 10px;
+    border-radius: 8px;
+    color: white;
+}
+.color-btn {
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 50%;
+    margin: 5px;
+    cursor: pointer;
+}
+#size-slider {
+    width: 100px;
+}
+.active {
+    border: 2px solid white !important;
+}
+.mode-active {
+    background: #4CAF50 !important;
+    color: white;
+}
+#stats {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 10px;
+    font-family: monospace;
+    display: flex;
+    justify-content: space-around;
+}
+#controls-help {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 10px;
+    border-radius: 8px;
+    font-family: monospace;
+}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+    <button class="color-btn" style="background: #ff0000" data-color="#ff0000"></button>
+    <button class="color-btn" style="background: #00ff00" data-color="#00ff00"></button>
+    <button class="color-btn" style="background: #0000ff" data-color="#0000ff"></button>
+    <button class="color-btn" style="background: #ffff00" data-color="#ffff00"></button>
+    <button class="color-btn" style="background: #ffffff; border: 1px solid #666" data-color="#ffffff"></button>
+    <br>
+    Spray Size: <input type="range" id="size-slider" min="1" max="10" value="3">
+    <br>
+    <button onclick="clearVoxels()">Clear All</button>
+    <br>
+    <button onclick="autoRotate()">Toggle Auto-Rotate</button>
+    <br>
+    <button id="sprayToggle" onclick="toggleSprayMode()">Toggle Spray Mode</button>
+    <br>
+    <button id="drawMode" onclick="toggleDrawMode()">Single Voxel Mode</button>
+    <br>
+    <button onclick="exportScene()">Export Scene</button>
+    <br>
+    <input type="file" id="importFile" style="display: none" onchange="importScene(this.files[0])">
+    <button onclick="document.getElementById('importFile').click()">Import Scene</button>
+    <br>
+    <input type="file" id="imageFile" style="display: none" accept="image/*" onchange="importImage(this.files[0])">
+    <button onclick="document.getElementById('imageFile').click()">Import Image</button>
+    <br>
+    Primitive: <select id="primitive-select">
+        <option value="cube">Cube</option>
+        <option value="sphere">Sphere</option>
+        <option value="cylinder">Cylinder</option>
+        <option value="cone">Cone</option>
+        <option value="torus">Torus</option>
+    </select>
+    <button onclick="createPrimitive()">Add Primitive</button>
+    <br>
+    Primitive Size: <input type="range" id="primitive-size" min="1" max="10" value="2" step="0.5">
+    <span id="size-value">2</span>
+    <br>
+    Segments/Resolution: <input type="range" id="primitive-segments" min="4" max="64" value="32">
+    <span id="segments-value">32</span>
+    <br>
+    <button onclick="optimizeScene()">Optimize Scene</button>
+</div>
+
+<div id="controls-help">
+    Controls:<br>
+    W - Move Forward<br>
+    S - Move Backward<br>
+    A - Move Left<br>
+    D - Move Right<br>
+    Space - Move Up<br>
+    Shift - Move Down<br>
+    H - Return Home
+</div>
+
+<div id="stats">
+    <span id="voxelCount">Voxels: 0</span>
+    <span id="cameraPos">Camera Position: x:0 y:0 z:0</span>
+    <span id="cameraRotation">Camera Rotation: pitch:0&#xb0; yaw:0&#xb0; roll:0&#xb0;</span>
+</div>
+
+<script>let scene, camera, renderer, raycaster, mouse, controls;
+let voxels = new Set();
+let currentColor = "#ff0000";
+let isMouseDown = false;
+let spraySize = 3;
+let isAutoRotating = false;
+let isSprayMode = false;
+let isDrawMode = false;
+let moveSpeed = 0.5;
+let keyStates = {};
+let HOME_POSITION = null;
+let HOME_TARGET = new THREE.Vector3(0, 0, 0);
+const geometryPool = {
+  box: new THREE.BoxGeometry(1, 1, 1),
+  getGeometry: function () {
+    return this.box;
+  }
+};
+const materialPool = {
+  materials: new Map(),
+  getMaterial: function (color) {
+    if (!this.materials.has(color)) {
+      this.materials.set(color, new THREE.MeshPhongMaterial({
+        color: color,
+        side: THREE.FrontSide
+      }));
+    }
+    return this.materials.get(color);
+  },
+  dispose: function () {
+    this.materials.forEach(material => material.dispose());
+    this.materials.clear();
+  }
+};
+const instancedGeometry = new THREE.InstancedBufferGeometry();
+instancedGeometry.copy(geometryPool.box);
+const instancedMaterial = new THREE.MeshPhongMaterial();
+function updateStats() {
+  document.getElementById('voxelCount').textContent = `Voxels: ${voxels.size}`;
+  const pos = camera.position;
+  document.getElementById('cameraPos').textContent = `Camera Position: x:${pos.x.toFixed(2)} y:${pos.y.toFixed(2)} z:${pos.z.toFixed(2)}`;
+  const rotation = camera.rotation;
+  const pitch = THREE.MathUtils.radToDeg(rotation.x);
+  const yaw = THREE.MathUtils.radToDeg(rotation.y);
+  const roll = THREE.MathUtils.radToDeg(rotation.z);
+  document.getElementById('cameraRotation').textContent = `Camera Rotation: pitch:${pitch.toFixed(1)}° yaw:${yaw.toFixed(1)}° roll:${roll.toFixed(1)}°`;
+}
+function init() {
+  if (scene || camera || renderer) {
+    cleanup();
+  }
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    powerPreference: "high-performance",
+    precision: "highp",
+    logarithmicDepthBuffer: true,
+    stencil: false,
+    alpha: false
+  });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.sortObjects = false;
+  renderer.physicallyCorrectLights = true;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1;
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x000000, 1);
+  renderer.sortObjects = true;
+  renderer.autoClear = true;
+  document.body.appendChild(renderer.domElement);
+  const size = 1000;
+  const divisions = 1000;
+  const gridHelper = new THREE.GridHelper(size, divisions);
+  scene.add(gridHelper);
+  camera.position.set(20, 20, 20);
+  camera.lookAt(0, 0, 0);
+  saveHomePosition();
+  raycaster = new THREE.Raycaster();
+  mouse = new THREE.Vector2();
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(ambientLight);
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+  directionalLight.position.set(10, 20, 10);
+  scene.add(directionalLight);
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  const planeGeometry = new THREE.PlaneGeometry(1000, 1000);
+  const planeMaterial = new THREE.MeshBasicMaterial({
+    visible: false,
+    side: THREE.DoubleSide
+  });
+  const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+  plane.rotateX(-Math.PI / 2);
+  scene.add(plane);
+  scene.matrixWorldAutoUpdate = false;
+  scene.autoUpdate = true;
+  const occlusionCullingCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  scene.add(occlusionCullingCamera);
+  const primitiveSelect = document.getElementById('primitive-select');
+  primitiveSelect.addEventListener('change', () => {
+    if (!isSprayMode && !isDrawMode) {
+      controls.enabled = true;
+    }
+  });
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mousedown', onMouseDown);
+  document.addEventListener('mouseup', onMouseUp);
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup', onKeyUp);
+  document.querySelectorAll('.color-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentColor = btn.dataset.color;
+      document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  document.getElementById('size-slider').addEventListener('input', e => {
+    spraySize = parseInt(e.target.value);
+  });
+  document.querySelector('.color-btn').classList.add('active');
+  document.getElementById('primitive-size').addEventListener('input', (e) => {
+    document.getElementById('size-value').textContent = e.target.value;
+  });
+  document.getElementById('primitive-segments').addEventListener('input', (e) => {
+    document.getElementById('segments-value').textContent = e.target.value;
+  });
+  animate();
+  window.addEventListener('beforeunload', cleanup);
+  let resizeTimeout;
+  window.addEventListener('resize', () => {
+    if (resizeTimeout) {
+      clearTimeout(resizeTimeout);
+    }
+    resizeTimeout = setTimeout(() => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }, 100);
+  });
+}
+function onKeyDown(event) {
+  keyStates[event.key.toLowerCase()] = true;
+  if (event.key.toLowerCase() === 'h') {
+    returnToHome();
+  }
+}
+function onKeyUp(event) {
+  keyStates[event.key.toLowerCase()] = false;
+}
+function handleKeyboardMovement() {
+  if (!isSprayMode && !isDrawMode) {
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const right = new THREE.Vector3();
+    right.crossVectors(forward, camera.up);
+    if (keyStates['w']) camera.position.addScaledVector(forward, moveSpeed);
+    if (keyStates['s']) camera.position.addScaledVector(forward, -moveSpeed);
+    if (keyStates['a']) camera.position.addScaledVector(right, -moveSpeed);
+    if (keyStates['d']) camera.position.addScaledVector(right, moveSpeed);
+    if (keyStates[' ']) camera.position.y += moveSpeed;
+    if (keyStates['shift']) camera.position.y -= moveSpeed;
+  }
+}
+function exportScene() {
+  const sceneData = [];
+  voxels.forEach(key => {
+    const [x, y, z] = key.split(',').map(Number);
+    const voxel = scene.children.find(obj => obj.userData.key === key);
+    if (voxel && voxel instanceof THREE.LOD && voxel.levels.length > 0) {
+      const color = voxel.levels[0].object.material.color;
+      sceneData.push({
+        position: {
+          x,
+          y,
+          z
+        },
+        color: color.getHexString()
+      });
+    }
+  });
+  const blob = new Blob([JSON.stringify(sceneData)], {
+    type: 'application/json'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'voxel-scene.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function importScene(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      clearVoxels();
+      const sceneData = JSON.parse(e.target.result);
+      sceneData.forEach(voxelData => {
+        const {
+          position,
+          color
+        } = voxelData;
+        currentColor = '#' + color;
+        createVoxel(position.x, position.y, position.z);
+      });
+      removeInteriorVoxels();
+    } catch (error) {
+      console.error('Error importing scene:', error);
+      alert('Error importing scene. Please check the file format.');
+    }
+  };
+  reader.readAsText(file);
+}
+function importImage(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    const img = new Image();
+    img.onload = function () {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const maxDim = 100;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          const ratio = Math.min(maxDim / width, maxDim / height);
+          width *= ratio;
+          height *= ratio;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        clearVoxels();
+        const offsetX = -Math.floor(width / 2);
+        const offsetZ = -Math.floor(height / 2);
+        for (let z = 0; z < height; z++) {
+          for (let x = 0; x < width; x++) {
+            const i = (z * width + x) * 4;
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const a = data[i + 3];
+            if (a > 128) {
+              const color = '#' + r.toString(16).padStart(2, '0') + g.toString(16).padStart(2, '0') + b.toString(16).padStart(2, '0');
+              currentColor = color;
+              createVoxel(x + offsetX, 0, z + offsetZ);
+            }
+          }
+        }
+        removeInteriorVoxels();
+      } catch (error) {
+        console.error('Error processing image:', error);
+        alert('Error processing image. Please try a different image.');
+      }
+    };
+    img.onerror = function () {
+      console.error('Error loading image');
+      alert('Error loading image. Please try a different image.');
+    };
+    img.src = e.target.result;
+  };
+  reader.onerror = function () {
+    console.error('Error reading file');
+    alert('Error reading file. Please try again.');
+  };
+  reader.readAsDataURL(file);
+}
+function toggleSprayMode() {
+  isSprayMode = !isSprayMode;
+  isDrawMode = false;
+  const sprayBtn = document.getElementById('sprayToggle');
+  const drawBtn = document.getElementById('drawMode');
+  sprayBtn.classList.toggle('mode-active');
+  drawBtn.classList.remove('mode-active');
+  if (isSprayMode) {
+    controls.enabled = false;
+  } else {
+    controls.enabled = true;
+  }
+}
+function toggleDrawMode() {
+  isDrawMode = !isDrawMode;
+  isSprayMode = false;
+  const drawBtn = document.getElementById('drawMode');
+  const sprayBtn = document.getElementById('sprayToggle');
+  drawBtn.classList.toggle('mode-active');
+  sprayBtn.classList.remove('mode-active');
+  if (isDrawMode) {
+    controls.enabled = false;
+  } else {
+    controls.enabled = true;
+  }
+}
+function autoRotate() {
+  isAutoRotating = !isAutoRotating;
+  controls.autoRotate = isAutoRotating;
+}
+function onMouseDown(event) {
+  isMouseDown = true;
+  if (isSprayMode) {
+    updateMousePosition(event);
+    spray();
+  } else if (isDrawMode) {
+    updateMousePosition(event);
+    drawSingleVoxel();
+  }
+}
+function onMouseUp() {
+  isMouseDown = false;
+}
+function updateMousePosition(event) {
+  mouse.x = event.clientX / window.innerWidth * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+}
+function onMouseMove(event) {
+  if (isSprayMode || isDrawMode) {
+    updateMousePosition(event);
+    if (isMouseDown && isSprayMode) {
+      spray();
+    }
+  }
+}
+function spray() {
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(scene.children, true);
+  if (intersects.length > 0) {
+    const point = intersects[0].point;
+    const roundedX = Math.round(point.x);
+    const roundedY = Math.round(point.y);
+    const roundedZ = Math.round(point.z);
+    for (let x = -spraySize; x <= spraySize; x++) {
+      for (let y = -spraySize; y <= spraySize; y++) {
+        for (let z = -spraySize; z <= spraySize; z++) {
+          const distance = Math.sqrt(x * x + y * y + z * z);
+          if (Math.random() < 0.5 * (1 - distance / spraySize) && distance <= spraySize) {
+            const voxelX = roundedX + x;
+            const voxelY = Math.max(0, roundedY + y);
+            const voxelZ = roundedZ + z;
+            if (currentColor === "#ffffff") {
+              const key = `${voxelX},${voxelY},${voxelZ}`;
+              if (voxels.has(key)) {
+                const voxelToRemove = scene.children.find(obj => obj.userData.key === key);
+                if (voxelToRemove) {
+                  scene.remove(voxelToRemove);
+                  voxels.delete(key);
+                }
+              }
+            } else {
+              createVoxel(voxelX, voxelY, voxelZ);
+            }
+          }
+        }
+      }
+    }
+  }
+  removeInteriorVoxels();
+}
+function createVoxel(x, y, z) {
+  const key = `${x},${y},${z}`;
+  if (!voxels.has(key)) {
+    try {
+      const matrix = new THREE.Matrix4();
+      matrix.setPosition(x, y, z);
+      const material = materialPool.getMaterial(currentColor);
+      if (!material) {
+        console.error('Failed to create material for color:', currentColor);
+        return;
+      }
+      const mesh = new THREE.Mesh(geometryPool.getGeometry(), material);
+      mesh.position.set(x, y, z);
+      mesh.frustumCulled = true;
+      const lod = new THREE.LOD();
+      lod.addLevel(mesh, 0);
+      const medMesh = mesh.clone();
+      medMesh.scale.set(0.9, 0.9, 0.9);
+      lod.addLevel(medMesh, 50);
+      const lowMesh = mesh.clone();
+      lowMesh.scale.set(0.8, 0.8, 0.8);
+      lod.addLevel(lowMesh, 100);
+      lod.boundingSphere = new THREE.Sphere();
+      lod.boundingSphere.center.set(x, y, z);
+      lod.boundingSphere.radius = 1;
+      lod.userData.key = key;
+      scene.add(lod);
+      voxels.add(key);
+    } catch (error) {
+      console.error('Error creating voxel:', error);
+    }
+  }
+}
+function removeInteriorVoxels() {
+  const voxelsToRemove = new Set();
+  voxels.forEach(key => {
+    const [x, y, z] = key.split(',').map(Number);
+    const hasNeighbors = [`${x + 1},${y},${z}`, `${x - 1},${y},${z}`, `${x},${y + 1},${z}`, `${x},${y - 1},${z}`, `${x},${y},${z + 1}`, `${x},${y},${z - 1}`].every(neighborKey => voxels.has(neighborKey));
+    if (hasNeighbors) {
+      voxelsToRemove.add(key);
+    }
+  });
+  voxelsToRemove.forEach(key => {
+    const voxelToRemove = scene.children.find(obj => obj.userData.key === key);
+    if (voxelToRemove) {
+      scene.remove(voxelToRemove);
+      voxels.delete(key);
+    }
+  });
+  return voxelsToRemove.size;
+}
+function clearVoxels() {
+  voxels.forEach(key => {
+    const voxelToRemove = scene.children.find(obj => obj.userData.key === key);
+    if (voxelToRemove) {
+      scene.remove(voxelToRemove);
+    }
+  });
+  voxels.clear();
+}
+function saveHomePosition() {
+  HOME_POSITION = new THREE.Vector3(20, 20, 20);
+}
+function returnToHome() {
+  if (HOME_POSITION) {
+    camera.position.copy(HOME_POSITION);
+    controls.target.copy(HOME_TARGET);
+    camera.lookAt(HOME_TARGET);
+    controls.update();
+  }
+}
+function drawSingleVoxel() {
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(scene.children, true);
+  if (intersects.length > 0) {
+    const point = intersects[0].point;
+    const roundedX = Math.round(point.x);
+    const roundedY = Math.round(point.y);
+    const roundedZ = Math.round(point.z);
+    if (currentColor === "#ffffff") {
+      const key = `${roundedX},${roundedY},${roundedZ}`;
+      if (voxels.has(key)) {
+        const voxelToRemove = scene.children.find(obj => obj.userData.key === key);
+        if (voxelToRemove) {
+          scene.remove(voxelToRemove);
+          voxels.delete(key);
+        }
+      }
+    } else {
+      createVoxel(roundedX, Math.max(0, roundedY), roundedZ);
+    }
+    removeInteriorVoxels();
+  }
+}
+function createPrimitive() {
+    const primitiveType = document.getElementById('primitive-select').value;
+    const size = parseFloat(document.getElementById('primitive-size').value);
+    const segments = parseInt(document.getElementById('primitive-segments').value);
+    
+    let geometry;
+    switch (primitiveType) {
+        case 'cube':
+            geometry = new THREE.BoxGeometry(size, size, size, segments, segments, segments);
+            break;
+        case 'sphere':
+            geometry = new THREE.SphereGeometry(size/2, segments, segments);
+            break;
+        case 'cylinder':
+            geometry = new THREE.CylinderGeometry(size/2, size/2, size, segments);
+            break;
+        case 'cone':
+            geometry = new THREE.ConeGeometry(size/2, size, segments);
+            break;
+        case 'torus':
+            geometry = new THREE.TorusGeometry(size/2, size/4, segments/2, segments);
+            break;
+        default:
+            geometry = new THREE.BoxGeometry(size, size, size);
+    }
+
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(scene.children, true);
+    
+    if (intersects.length > 0) {
+        const point = intersects[0].point;
+        const material = new THREE.MeshPhongMaterial({ color: currentColor });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(
+            Math.round(point.x), 
+            Math.round(Math.max(0, point.y)), 
+            Math.round(point.z)
+        );
+
+        // Create a higher resolution sampling for better voxelization
+        const bbox = new THREE.Box3().setFromObject(mesh);
+        const voxelSize = 0.5; // Smaller size for better sampling
+        const tempVec = new THREE.Vector3();
+        const raycasters = [
+            new THREE.Raycaster(), // X axis
+            new THREE.Raycaster(), // Y axis
+            new THREE.Raycaster()  // Z axis
+        ];
+        const directions = [
+            new THREE.Vector3(1, 0, 0),
+            new THREE.Vector3(0, 1, 0),
+            new THREE.Vector3(0, 0, 1)
+        ];
+        
+        // Sample points within bounding box
+        for (let x = Math.floor(bbox.min.x); x <= Math.ceil(bbox.max.x); x += voxelSize) {
+            for (let y = Math.floor(bbox.min.y); y <= Math.ceil(bbox.max.y); y += voxelSize) {
+                for (let z = Math.floor(bbox.min.z); z <= Math.ceil(bbox.max.z); z += voxelSize) {
+                    tempVec.set(x + voxelSize/2, y + voxelSize/2, z + voxelSize/2);
+                    
+                    // Check intersection from multiple directions for better accuracy
+                    let insideCount = 0;
+                    for (let i = 0; i < 3; i++) {
+                        raycasters[i].set(tempVec, directions[i]);
+                        const hits = raycasters[i].intersectObject(mesh);
+                        if (hits.length % 2 === 1) {
+                            insideCount++;
+                        }
+                    }
+                    
+                    // If point is considered inside from majority of directions
+                    if (insideCount >= 2) {
+                        createVoxel(Math.round(x), Math.round(Math.max(0, y)), Math.round(z));
+                    }
+                }
+            }
+        }
+
+        // Cleanup
+        geometry.dispose();
+        material.dispose();
+    }
+    
+    // Optimize the scene after creating the primitive
+    removeInteriorVoxels();
+}
+
+let lastFrameTime = 0;
+const frameLimit = 1000 / 60;
+function animate(currentTime) {
+    if (!scene || !camera || !renderer) {
+        return;
+    }
+    
+    requestAnimationFrame(animate);
+    
+    // Limit frame rate
+    if (currentTime - lastFrameTime < frameLimit) {
+        return;
+    }
+    lastFrameTime = currentTime;
+    
+    // Update world matrices only when needed
+    if (scene.updateMatrixWorld) {
+        scene.updateMatrixWorld(true);
+    }
+    
+    // Update controls and camera
+    if (controls && !controls.disposed) {
+        controls.update();
+    }
+    
+    handleKeyboardMovement();
+    updateStats();
+    
+    // Frustum culling optimization
+    const frustum = new THREE.Frustum();
+    const matrix = new THREE.Matrix4().multiplyMatrices(
+        camera.projectionMatrix,
+        camera.matrixWorldInverse
+    );
+    frustum.setFromProjectionMatrix(matrix);
+    
+    // Batch visibility updates
+    const visibilityUpdates = [];
+    scene.traverse(function(object) {
+        if (object instanceof THREE.LOD) {
+            if (!object.boundingSphere) {
+                object.boundingSphere = new THREE.Sphere();
+                object.boundingSphere.center.copy(object.position);
+                object.boundingSphere.radius = 1;
+            }
+            visibilityUpdates.push({
+                object,
+                visible: frustum.intersectsSphere(object.boundingSphere)
+            });
+        }
+    });
+    
+    // Apply visibility updates in batch
+    visibilityUpdates.forEach(({object, visible}) => {
+        object.visible = visible;
+    });
+    
+    // Render scene
+    renderer.render(scene, camera);
+}
+function cleanup() {
+  if (renderer) {
+    renderer.setAnimationLoop(null);
+  }
+  if (voxels) {
+    clearVoxels();
+  }
+  if (geometryPool && geometryPool.box) {
+    geometryPool.box.dispose();
+  }
+  if (materialPool) {
+    materialPool.dispose();
+  }
+  if (controls) {
+    if (typeof controls.dispose === 'function') {
+      controls.dispose();
+    }
+    controls.disposed = true;
+  }
+  if (renderer) {
+    renderer.dispose();
+    renderer.forceContextLoss();
+    renderer.domElement.remove();
+  }
+  scene = null;
+  camera = null;
+  renderer = null;
+  raycaster = null;
+  mouse = null;
+  controls = null;
+  if (voxels) {
+    voxels.clear();
+    voxels = null;
+  }
+}
+window.addEventListener('unload', cleanup);
+init();</script>
+
+</body></html>
